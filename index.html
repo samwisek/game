@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BetWise AI</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#07090d;color:#dde8e0;font-family:Georgia,serif;min-height:100vh;}
+input,select,button{font-family:Georgia,serif;}
+.grid-bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+background-image:linear-gradient(rgba(0,230,118,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,230,118,0.025) 1px,transparent 1px);
+background-size:36px 36px;}
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div id="root"></div>
+<script type="text/babel">
+const {useState}=React;
+const API_KEY="d17d9fa694msh0cd92fe835223c6p1ddef1jsn4bcba1e84d48";
+const API_HOST="free-api-live-football-data.p.rapidapi.com";
+const APP_PWD="betwise2024";
+const TODAY=new Date().toISOString().split("T")[0];
+const IS_LIVE=window.location.hostname.includes("github.io")||window.location.hostname.includes("netlify")||window.location.hostname.includes("vercel");
+function fmtDate(d){return new Date(d).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});}
+function confCol(c){return c>=88?"#ffd600":c>=80?"#00e676":"#42a5f5";}
+function sGet(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch{return d;}}
+function sSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
+const C={
+card:(e={})=>({background:"#0d1318",border:"1px solid rgba(0,230,118,0.13)",borderRadius:10,...e}),
+btn:(bg="#00e676",col="#000",e={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"10px 18px",fontWeight:700,fontSize:"0.88rem",cursor:"pointer",letterSpacing:1,fontFamily:"Georgia,serif",...e}),
+inp:{background:"#121a22",border:"1px solid rgba(0,230,118,0.2)",color:"#dde8e0",padding:"10px 13px",fontSize:"0.88rem",borderRadius:6,outline:"none",fontFamily:"Georgia,serif",width:"100%"},
+lbl:{fontSize:"0.62rem",color:"#4a6355",letterSpacing:3,textTransform:"uppercase",marginBottom:5,display:"block"},
+div:{fontSize:"0.6rem",color:"#4a6355",letterSpacing:3,textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,margin:"18px 0 10px"},
+tag:(col="#00e676")=>({background:col+"18",border:"1px solid "+col+"44",color:col,fontSize:"0.78rem",fontWeight:700,padding:"4px 10px",borderRadius:4,textTransform:"uppercase"}),
+};
+function norm(m){return{home:m.home?.name||m.homeTeam?.name||m.home_team||m.home||"Home",away:m.away?.name||m.awayTeam?.name||m.away_team||m.away||"Away",league:m.league?.name||m.competition?.name||m.league_name||m.league||"Football",time:m.time||m.kickoff||m.match_time||"--:--"};}
+function TipCard({t}){
+const col=confCol(t.confidence);
+return(
+<div style={{background:"linear-gradient(135deg,rgba(26,35,126,0.22),rgba(74,20,140,0.12))",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:16,marginBottom:12}}>
+<div style={{fontSize:"0.6rem",color:"#9575cd",letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>🏆 {t.league}</div>
+<div style={{fontWeight:700,fontSize:"1rem",marginBottom:10}}>{t.match}</div>
+<div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10}}>
+<div style={C.tag(t.confidence>=88?"#ffd600":"#00e676")}>✅ {t.tip}</div>
+<div style={{background:"#121a22",border:"1px solid rgba(255,255,255,0.08)",color:"#fff",fontFamily:"monospace",fontWeight:900,fontSize:"1rem",padding:"4px 12px",borderRadius:4}}>@ {t.odds}</div>
+{t.confidence>=88&&<span style={{fontSize:"0.68rem",color:"#ffd600"}}>⭐ BEST BET</span>}
+</div>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+<div style={{fontSize:"0.6rem",color:"#4a6355",width:72,flexShrink:0}}>Confidence</div>
+<div style={{flex:1,height:5,background:"rgba(255,255,255,0.05)",borderRadius:3,overflow:"hidden"}}>
+<div style={{height:"100%",width:t.confidence+"%",background:"linear-gradient(90deg,"+col+"99,"+col+")",borderRadius:3}}/>
+</div>
+<div style={{fontWeight:900,color:col,width:38,textAlign:"right",fontSize:"0.9rem"}}>{t.confidence}%</div>
+</div>
+<div style={{fontSize:"0.78rem",color:"#607d6b",lineHeight:1.65,paddingTop:8,borderTop:"1px solid rgba(255,255,255,0.04)"}}>{t.reasoning}</div>
+</div>
+);}
+function App(){
+const [page,setPage]=useState("login");
+const [pwd,setPwd]=useState("");
+const [pwdErr,setPwdErr]=useState(false);
+const [tab,setTab]=useState("tips");
+const [date,setDate]=useState(TODAY);
+const [matches,setMatches]=useState([]);
+const [tips,setTips]=useState([]);
+const [fetching,setFetching]=useState(false);
+const [analysing,setAnalysing]=useState(false);
+const [msg,setMsg]=useState("");
+const [isDemo,setIsDemo]=useState(false);
+const [minConf,setMinConf]=useState(75);
+const [copied,setCopied]=useState(false);
+const [mHome,setMHome]=useState("");
+const [mAway,setMAway]=useState("");
+const [mLeague,setMLeague]=useState("");
+const [mTime,setMTime]=useState("");
+const [mList,setMList]=useState([]);
+const [mTips,setMTips]=useState([]);
+const [mAnalysing,setMAnalysing]=useState(false);
+const [mCopied,setMCopied]=useState(false);
+const [history,setHistory]=useState(()=>sGet("bw_hist",[]));
+const [brand,setBrand]=useState(()=>sGet("bw_brand","BetWise AI"));
+const [brandSaved,setBrandSaved]=useState(false);
+function login(){if(pwd===APP_PWD){setPage("main");setPwdErr(false);}else setPwdErr(true);}
+async function fetchMatches(){
+setFetching(true);setMsg("");setMatches([]);setTips([]);setIsDemo(false);
+if(!IS_LIVE){
+setIsDemo(true);
+setMsg("⚠️ PREVIEW MODE — Live API blocked here. Use Manual tab for tips. Real data loads automatically once hosted on GitHub Pages.");
+setFetching(false);return;
+}
+try{
+const res=await fetch("https://"+API_HOST+"/football-get-matches-by-date?date="+date,{headers:{"x-rapidapi-key":API_KEY,"x-rapidapi-host":API_HOST}});
+if(!res.ok)throw new Error("HTTP "+res.status);
+const json=await res.json();
+const arr=json.response||json.data||json.matches||json.results||(Array.isArray(json)?json:null);
+if(arr&&arr.length>0){setMatches(arr);setMsg("✅ "+arr.length+" live matches loaded for "+fmtDate(date));}
+else setMsg("⚠️ No matches found for "+fmtDate(date)+". Try another date.");
+}catch(e){setMsg("❌ Failed: "+e.message);}
+setFetching(false);
+}
+async function analyse(src,setSrc,setLoad){
+if(!src.length)return;
+setLoad(true);setSrc([]);
+const lines=src.slice(0,18).map((m,i)=>{const n=norm(m);return(i+1)+". "+n.home+" vs "+n.away+" ("+n.league+")";}).join("\n");
+const prompt="You are an elite football betting analyst. Pick the BEST 6 tips from these matches targeting odds 1.15-1.55. Safe markets only: Over 0.5/1.5 Goals, Double Chance 1X/X2/12, Home Win, Draw No Bet, BTTS No.\n\nMATCHES ("+fmtDate(date)+"):\n"+lines+"\n\nRespond ONLY as a valid JSON array. No markdown. No text outside array:\n[{\"match\":\"...\",\"league\":\"...\",\"tip\":\"...\",\"odds\":\"1.35\",\"confidence\":85,\"reasoning\":\"2 sentences.\"}]";
+try{
+const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,messages:[{role:"user",content:prompt}]})});
+const data=await res.json();
+const raw=(data.content||[]).map(b=>b.text||"").join("");
+const s=raw.indexOf("["),e=raw.lastIndexOf("]");
+if(s===-1)throw new Error("no json");
+setSrc(JSON.parse(raw.slice(s,e+1)));
+}catch{setSrc([{error:true}]);}
+setLoad(false);
+}
+function saveHistory(tipsList,label){
+const e={id:Date.now(),date,label,tips:tipsList};
+const updated=[e,...history].slice(0,60);
+setHistory(updated);sSet("bw_hist",updated);
+}
+function markResult(eid,ti,result){
+const updated=history.map(e=>{if(e.id!==eid)return e;return{...e,tips:e.tips.map((t,i)=>i===ti?{...t,result}:t)};});
+setHistory(updated);sSet("bw_hist",updated);
+}
+function buildWA(tipsList){
+const hdr="🏆 *"+brand+" — Daily Tips*\n📅 "+fmtDate(date)+"\n"+"─".repeat(28)+"\n\n";
+const body=tipsList.filter(t=>!t.error&&t.confidence>=minConf).map((t,i)=>"*"+(i+1)+". "+t.match+"*\n✅ *"+t.tip+"* @ "+t.odds+"\n📊 Confidence: "+t.confidence+"%\n💬 "+t.reasoning).join("\n\n");
+return hdr+body+"\n\n"+"─".repeat(28)+"\n_"+brand+" · Bet responsibly_";
+}
+async function copyTips(tipsList,setCop){try{await navigator.clipboard.writeText(buildWA(tipsList));}catch{}setCop(true);setTimeout(()=>setCop(false),2500);}
+const ftips=tips.filter(t=>!t.error&&t.confidence>=minConf);
+const fmtips=mTips.filter(t=>!t.error&&t.confidence>=minConf);
+const allT=history.flatMap(e=>e.tips.filter(t=>!t.error));
+const graded=allT.filter(t=>t.result==="win"||t.result==="loss");
+const wins=graded.filter(t=>t.result==="win").length;
+const wr=graded.length?Math.round(wins/graded.length*100):null;
+const avgConf=ftips.length?Math.round(ftips.reduce((a,t)=>a+t.confidence,0)/ftips.length):null;
+if(page==="login")return(
+<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",position:"relative",zIndex:1}}>
+<div style={{...C.card(),padding:36,width:"100%",maxWidth:360,textAlign:"center"}}>
+<div style={{fontSize:"2.4rem",fontWeight:900,color:"#00e676",textShadow:"0 0 30px rgba(0,230,118,0.5)",letterSpacing:2,marginBottom:4}}>Bet<span style={{color:"#ffd600"}}>Wise</span></div>
+<div style={{fontSize:"0.65rem",color:"#4a6355",letterSpacing:3,textTransform:"uppercase",marginBottom:32}}>Personal AI Football Analyst</div>
+<label style={C.lbl}>Password</label>
+<input type="password" value={pwd} placeholder="Enter password" style={{...C.inp,textAlign:"center",marginBottom:14,fontSize:"1rem"}} onChange={e=>setPwd(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
+{pwdErr&&<div style={{color:"#ff5252",fontSize:"0.78rem",marginBottom:10}}>❌ Wrong password</div>}
+<button style={{...C.btn(),width:"100%",fontSize:"1rem",padding:"12px"}} onClick={login}>Enter →</button>
+<div style={{fontSize:"0.65rem",color:"#4a6355",marginTop:16}}>Default: <strong style={{color:"#00e676"}}>betwise2024</strong></div>
+</div>
+</div>
+);
+return(
+<div style={{paddingBottom:60,position:"relative",zIndex:1}}>
+<div style={{maxWidth:720,margin:"0 auto",padding:"0 14px"}}>
+<div style={{padding:"22px 0 16px",borderBottom:"1px solid rgba(0,230,118,0.12)",marginBottom:20}}>
+<div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+<div>
+<div style={{fontSize:"2rem",fontWeight:900,color:"#00e676",textShadow:"0 0 24px rgba(0,230,118,0.4)",letterSpacing:2,lineHeight:1}}>{brand}</div>
+<div style={{fontSize:"0.6rem",color:"#4a6355",letterSpacing:3,textTransform:"uppercase",marginTop:3}}>1.2–1.5 Odds · Daily AI Tips</div>
+</div>
+<div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,23,68,0.1)",border:"1px solid rgba(255,23,68,0.25)",color:"#ff5252",fontSize:"0.62rem",fontWeight:700,letterSpacing:2,padding:"4px 9px",borderRadius:3}}>
+<span style={{width:5,height:5,background:"#ff5252",borderRadius:"50%",display:"inline-block"}}/>LIVE AI
+</div>
+</div>
+</div>
+<div style={{display:"flex",gap:4,marginBottom:20,borderBottom:"1px solid rgba(0,230,118,0.1)"}}>
+{[["tips","⚽ Tips"],["manual","✏️ Manual"],["history","📋 History"],["settings","⚙️ Settings"]].map(([id,lbl])=>(
+<button key={id} onClick={()=>setTab(id)} style={{background:"none",border:"none",color:tab===id?"#00e676":"#4a6355",fontWeight:tab===id?700:400,fontSize:"0.8rem",padding:"8px 10px",cursor:"pointer",borderBottom:tab===id?"2px solid #00e676":"2px solid transparent",fontFamily:"Georgia,serif",marginBottom:-1}}>{lbl}</button>
+))}
+</div>
+{tab==="tips"&&(
+<div>
+<div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"flex-end"}}>
+<div style={{flex:1,minWidth:130}}><label style={C.lbl}>Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} style={C.inp}/></div>
+<div style={{minWidth:100}}><label style={C.lbl}>Min Confidence</label><select value={minConf} onChange={e=>setMinConf(+e.target.value)} style={C.inp}>{[70,75,80,85,88,90].map(v=><option key={v} value={v}>{v}%+</option>)}</select></div>
+<button onClick={fetchMatches} disabled={fetching} style={{...C.btn("#00e676","#000",{opacity:fetching?0.5:1,whiteSpace:"nowrap"})}}>{fetching?"⏳ Loading...":"⚽ Fetch"}</button>
+</div>
+{msg&&<div style={{...C.card(),padding:"11px 15px",marginBottom:14,fontSize:"0.8rem",color:isDemo?"#ff9800":msg.startsWith("❌")?"#ff5252":"#00e676",border:"1px solid "+(isDemo?"rgba(255,152,0,0.3)":msg.startsWith("❌")?"rgba(255,82,82,0.25)":"rgba(0,230,118,0.25)")}}>{msg}</div>}
+{matches.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+{[{v:matches.length,l:"Matches"},{v:ftips.length||tips.length,l:"Tips"},{v:avgConf?avgConf+"%":"—",l:"Avg Conf"}].map((s,i)=>(
+<div key={i} style={{...C.card(),padding:"12px 8px",textAlign:"center"}}>
+<div style={{fontSize:"1.7rem",fontWeight:900,color:"#00e676",lineHeight:1}}>{s.v}</div>
+<div style={{fontSize:"0.6rem",color:"#4a6355",letterSpacing:2,textTransform:"uppercase",marginTop:3}}>{s.l}</div>
+</div>
+))}
+</div>}
+{matches.length>0&&!analysing&&tips.length===0&&<button onClick={()=>analyse(matches,setTips,setAnalysing)} style={{...C.btn("linear-gradient(135deg,#1a237e,#4a148c)","#fff",{width:"100%",padding:"13px",fontSize:"0.95rem",marginBottom:14})}}>🤖 AI Deep Analyse All Matches</button>}
+{isDemo&&matches.length===0&&!fetching&&<div style={{...C.card(),padding:20,marginBottom:14,textAlign:"center",border:"1px solid rgba(255,152,0,0.2)"}}>
+<div style={{fontSize:"1.6rem",marginBottom:8}}>🔌</div>
+<div style={{fontWeight:700,color:"#ff9800",marginBottom:6}}>Live Data Unavailable Here</div>
+<div style={{fontSize:"0.78rem",color:"#4a6355",lineHeight:1.7}}>Switch to <strong style={{color:"#ffd600"}}>✏️ Manual</strong> tab to add matches and get AI tips now.</div>
+</div>}
+{analysing&&<div style={{...C.card(),padding:28,textAlign:"center",marginBottom:14}}>
+<div style={{fontSize:"2rem",marginBottom:8}}>🤖</div>
+<div style={{color:"#ce93d8",fontWeight:700,marginBottom:4}}>AI analysing all matches...</div>
+<div style={{fontSize:"0.75rem",color:"#4a6355"}}>Checking form · H2H · Goals · Home/Away records</div>
+</div>}
+{ftips.length>0&&<div>
+<div style={C.div}>🏆 Premium Tips ({ftips.length})<div style={{flex:1,height:1,background:"rgba(0,230,118,0.1)"}}/></div>
+<div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+<button onClick={()=>copyTips(ftips,setCopied)} style={C.btn("#ffd600","#000")}>{copied?"✅ Copied!":"📲 Copy for WhatsApp"}</button>
+<button onClick={()=>saveHistory(ftips,"Auto")} style={C.btn("#0d1318","#00e676",{border:"1px solid rgba(0,230,118,0.3)"})}>💾 Save</button>
+<button onClick={()=>{setTips([]);setMatches([]);setMsg("");}} style={C.btn("#0d1318","#ff5252",{border:"1px solid rgba(255,82,82,0.2)"})}>🔄 Reset</button>
+</div>
+{ftips.map((t,i)=><TipCard key={i} t={t}/>)}
+</div>}
+{tips.length>0&&tips[0]?.error&&<div style={{...C.card(),padding:16,color:"#ff5252",fontSize:"0.85rem",border:"1px solid rgba(255,82,82,0.25)"}}>❌ AI failed. Please try again.</div>}
+{matches.length>0&&<div>
+<div style={C.div}>Fixtures<div style={{flex:1,height:1,background:"rgba(0,230,118,0.1)"}}/></div>
+{matches.slice(0,25).map((m,i)=>{const n=norm(m);return(
+<div key={i} style={{...C.card(),padding:"10px 14px",marginBottom:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+<div><div style={{fontSize:"0.6rem",color:"#4a6355",marginBottom:3}}>🏆 {n.league}</div><div style={{fontWeight:700,fontSize:"0.88rem"}}>{n.home} <span style={{color:"#4a6355"}}>vs</span> {n.away}</div></div>
+<div style={{color:"#ffd600",fontWeight:900,fontFamily:"monospace",fontSize:"0.88rem",flexShrink:0}}>{String(n.time).slice(0,5)}</div>
+</div>);})}
+</div>}
+{matches.length===0&&!fetching&&!isDemo&&<div style={{textAlign:"center",padding:"50px 20px",color:"#4a6355"}}>
+<div style={{fontSize:"2.5rem",marginBottom:10}}>🎯</div>
+<div style={{fontWeight:700,fontSize:"1.1rem",letterSpacing:2,marginBottom:5}}>READY TO ANALYSE</div>
+<div style={{fontSize:"0.8rem"}}>Pick a date and tap Fetch</div>
+</div>}
+</div>
+)}
+{tab==="manual"&&(
+<div>
+<div style={{...C.card(),padding:18,marginBottom:14}}>
+<div style={{fontSize:"0.65rem",color:"#4a6355",letterSpacing:3,textTransform:"uppercase",marginBottom:14}}>✏️ Add Match Manually</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+{[["Home Team",mHome,setMHome,"e.g. Arsenal"],["Away Team",mAway,setMAway,"e.g. Chelsea"],["League",mLeague,setMLeague,"e.g. Premier League"],["Time",mTime,setMTime,"e.g. 20:00"]].map(([lbl,val,set,ph])=>(
+<div key={lbl}><label style={C.lbl}>{lbl}</label><input value={val} onChange={e=>set(e.target.value)} placeholder={ph} style={C.inp}/></div>
+))}
+</div>
+<button disabled={!mHome||!mAway} onClick={()=>{if(!mHome||!mAway)return;setMList(p=>[...p,{home:mHome,away:mAway,league:mLeague||"Football",time:mTime||"--:--"}]);setMHome("");setMAway("");setMLeague("");setMTime("");}} style={{...C.btn("#00e676","#000",{opacity:(!mHome||!mAway)?0.4:1})}}>+ Add Match</button>
+</div>
+{mList.length>0&&<div>
+<div style={C.div}>Added ({mList.length})<div style={{flex:1,height:1,background:"rgba(0,230,118,0.1)"}}/></div>
+{mList.map((m,i)=>(
+<div key={i} style={{...C.card(),padding:"10px 14px",marginBottom:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+<div><div style={{fontSize:"0.6rem",color:"#4a6355",marginBottom:3}}>🏆 {m.league}</div><div style={{fontWeight:700,fontSize:"0.88rem"}}>{m.home} vs {m.away}</div></div>
+<div style={{display:"flex",alignItems:"center",gap:8}}>
+<span style={{color:"#ffd600",fontFamily:"monospace",fontSize:"0.85rem"}}>{m.time}</span>
+<button onClick={()=>setMList(p=>p.filter((_,j)=>j!==i))} style={{...C.btn("#0d1318","#ff5252",{padding:"4px 8px",fontSize:"0.75rem",border:"1px solid rgba(255,82,82,0.2)"})}}>✕</button>
+</div>
+</div>
+))}
+{!mAnalysing&&mTips.length===0&&<button onClick={()=>analyse(mList,setMTips,setMAnalysing)} style={{...C.btn("linear-gradient(135deg,#1a237e,#4a148c)","#fff",{width:"100%",padding:"13px",fontSize:"0.95rem",margin:"10px 0 14px"})}}>🤖 AI Analyse These Matches</button>}
+{mAnalysing&&<div style={{...C.card(),padding:24,textAlign:"center",marginTop:10}}><div style={{fontSize:"1.8rem",marginBottom:6}}>🤖</div><div style={{color:"#ce93d8",fontWeight:700}}>Analysing...</div></div>}
+{fmtips.length>0&&<div>
+<div style={C.div}>Tips ({fmtips.length})<div style={{flex:1,height:1,background:"rgba(0,230,118,0.1)"}}/></div>
+<div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+<button onClick={()=>copyTips(fmtips,setMCopied)} style={C.btn("#ffd600","#000")}>{mCopied?"✅ Copied!":"📲 Copy for WhatsApp"}</button>
+<button onClick={()=>{saveHistory(fmtips,"Manual");setMTips([]);setMList([]);}} style={C.btn("#0d1318","#00e676",{border:"1px solid rgba(0,230,118,0.3)"})}>💾 Save & Clear</button>
+</div>
+{fmtips.map((t,i)=><TipCard key={i} t={t}/>)}
+</div>}
+</div>}
+{mList.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:"#4a6355"}}><div style={{fontSize:"2rem",marginBottom:8}}>✏️</div><div style={{fontWeight:700,fontSize:"1rem",letterSpacing:1,marginBottom:4}}>ADD MATCHES MANUALLY</div><div style={{fontSize:"0.78rem"}}>Use when you know which matches are playing</div></div>}
+</div>
+)}
+{tab==="history"&&(
+<div>
+{graded.length>0&&<div style={{...C.card(),padding:"16px 18px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center",border:"1px solid rgba(0,230,118,0.25)"}}>
+<div>
+<div style={{fontSize:"0.6rem",color:"#4a6355",letterSpacing:3,textTransform:"uppercase",marginBottom:4}}>Overall Accuracy</div>
+<div style={{fontSize:"2rem",fontWeight:900,color:wr>=80?"#00e676":wr>=65?"#ffd600":"#ff5252"}}>{wr}%</div>
+</div>
+<div style={{textAlign:"right"}}>
+<div style={{fontSize:"0.6rem",color:"#4a6355",letterSpacing:3,textTransform:"uppercase",marginBottom:4}}>Graded Tips</div>
+<div style={{fontSize:"1.4rem",fontWeight:900,color:"#00e676"}}>{wins}/{graded.length}</div>
+</div>
+</div>}
+{history.length===0&&<div style={{textAlign:"center",padding:"50px 20px",color:"#4a6355"}}><div style={{fontSize:"2.2rem",marginBottom:10}}>📋</div><div style={{fontWeight:700,fontSize:"1rem",letterSpacing:1}}>NO HISTORY YET</div></div>}
+{history.map(e=>(
+<div key={e.id} style={{...C.card(),marginBottom:14,overflow:"hidden"}}>
+<div style={{background:"rgba(0,230,118,0.08)",padding:"11px 15px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid rgba(0,230,118,0.1)"}}>
+<div>
+<div style={{fontWeight:700,fontSize:"0.9rem"}}>{e.label}</div>
+<div style={{fontSize:"0.65rem",color:"#4a6355",marginTop:2}}>📅 {fmtDate(e.date)}</div>
+</div>
+<div style={{fontSize:"0.75rem",fontWeight:700,background:"rgba(255,255,255,0.05)",padding:"4px 10px",borderRadius:4}}>{e.tips.length} tips</div>
+</div>
+<div style={{padding:"12px 15px"}}>
+{e.tips.map((t,i)=>(
+<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:10,marginBottom:10,borderBottom:i<e.tips.length-1?"1px solid rgba(255,255,255,0.04)":"none"}}>
+<div style={{flex:1}}>
+<div style={{fontSize:"0.8rem",fontWeight:700,marginBottom:4}}>{t.match}</div>
+<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+<span style={C.tag(t.confidence>=88?"#ffd600":"#00e676")}>✅ {t.tip}</span>
+<span style={{fontSize:"0.75rem",color:"#4a6355"}}>@ {t.odds}</span>
+</div>
+</div>
+<div style={{display:"flex",gap:6}}>
+{t.result?<span style={{fontWeight:900,fontSize:"0.85rem",color:t.result==="win"?"#00e676":"#ff5252"}}>{t.result==="win"?"✅":"❌"}</span>:<div style={{display:"flex",gap:4}}>
+<button onClick={()=>markResult(e.id,i,"win")} style={{...C.btn("#00e676","#000",{padding:"4px 8px",fontSize:"0.7rem",fontWeight:900})}} >✓</button>
+<button onClick={()=>markResult(e.id,i,"loss")} style={{...C.btn("#ff5252","#fff",{padding:"4px 8px",fontSize:"0.7rem",fontWeight:900})}}>✕</button>
+</div>}
+</div>
+</div>
+))}
+</div>
+</div>
+))}
+</div>
+)}
+{tab==="settings"&&(
+<div>
+<div style={{...C.card(),padding:18,marginBottom:14}}>
+<label style={C.lbl}>Brand Name</label>
+<div style={{display:"flex",gap:8}}>
+<input value={brand} onChange={e=>setBrand(e.target.value)} style={C.inp}/>
+<button onClick={()=>{sSet("bw_brand",brand);setBrandSaved(true);setTimeout(()=>setBrandSaved(false),2000);}} style={{...C.btn("#00e676","#000",{whiteSpace:"nowrap"})}}>Save</button>
+</div>
+{brandSaved&&<div style={{fontSize:"0.75rem",color:"#00e676",marginTop:8}}>✅ Saved!</div>}
+</div>
+<div style={{...C.card(),padding:18,marginBottom:14}}>
+<label style={C.lbl}>About</label>
+<div style={{fontSize:"0.85rem",color:"#607d6b",lineHeight:1.8}}>
+<p style={{marginBottom:10}}><strong>BetWise AI</strong> is your personal football betting analyst, powered by Claude AI.</p>
+<p style={{marginBottom:10}}>🤖 <strong>AI Analysis:</strong> Deep match analysis for confident tips</p>
+<p style={{marginBottom:10}}>🏠 <strong>Manual Mode:</strong> Add your own matches and get instant analysis</p>
+<p style={{marginBottom:10}}>📊 <strong>Track Results:</strong> Grade tips as wins/losses to track accuracy</p>
+<p><strong>Version:</strong> 1.2.0</p>
+</div>
+</div>
+</div>
+)}
+</div>
+</div>
+</div>
+);
+}
+const root=ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App/>);
+</script>
+</body>
+</html>
